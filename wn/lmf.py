@@ -3,11 +3,28 @@
 Reader for the Lexical Markup Framework (LMF) format.
 """
 
-from typing import NamedTuple, Tuple, List, Dict, Optional, Type, TypeVar
+from typing import (
+    TypeVar,
+    Type,
+    Container,
+    List,
+    Dict,
+    Set,
+    NamedTuple,
+    Optional,
+    Tuple,
+)
 import warnings
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ET  # for general XML parsing
+import xml.parsers.expat  # for fast scanning of Lexicon versions
 
 from wn._types import AnyPath
+from wn.constants import (
+    SENSE_RELATIONS,
+    SYNSET_RELATIONS,
+    ADJPOSITIONS,
+    POS_LIST,
+)
 
 
 class LMFError(Exception):
@@ -18,107 +35,10 @@ class LMFWarning(Warning):
     """Issued on non-conforming LFM values."""
 
 
-_sense_rels = (
-    'antonym',
-    'also',
-    'participle',
-    'pertainym',
-    'derivation',
-    'domain_topic',
-    'has_domain_topic',
-    'domain_region',
-    'has_domain_region',
-    'exemplifies',
-    'is_exemplified_by',
-    'similar',
-    'other',
-)
-
-_synset_rels = (
-    'agent',
-    'also',
-    'attribute',
-    'be_in_state',
-    'causes',
-    'classified_by',
-    'classifies',
-    'co_agent_instrument',
-    'co_agent_patient',
-    'co_agent_result',
-    'co_instrument_agent',
-    'co_instrument_patient',
-    'co_instrument_result',
-    'co_patient_agent',
-    'co_patient_instrument',
-    'co_result_agent',
-    'co_result_instrument',
-    'co_role',
-    'direction',
-    'domain_region',
-    'domain_topic',
-    'exemplifies',
-    'entails',
-    'eq_synonym',
-    'has_domain_region',
-    'has_domain_topic',
-    'is_exemplified_by',
-    'holo_location',
-    'holo_member',
-    'holo_part',
-    'holo_portion',
-    'holo_substance',
-    'holonym',
-    'hypernym',
-    'hyponym',
-    'in_manner',
-    'instance_hypernym',
-    'instance_hyponym',
-    'instrument',
-    'involved',
-    'involved_agent',
-    'involved_direction',
-    'involved_instrument',
-    'involved_location',
-    'involved_patient',
-    'involved_result',
-    'involved_source_direction',
-    'involved_target_direction',
-    'is_caused_by',
-    'is_entailed_by',
-    'location',
-    'manner_of',
-    'mero_location',
-    'mero_member',
-    'mero_part',
-    'mero_portion',
-    'mero_substance',
-    'meronym',
-    'similar',
-    'other',
-    'patient',
-    'restricted_by',
-    'restricts',
-    'result',
-    'role',
-    'source_direction',
-    'state_of',
-    'target_direction',
-    'subevent',
-    'is_subevent_of',
-    'antonym',
-)
-
-_adjpositions = (
-    'a',
-    'ip',
-    'p',
-)
-
-_pos = tuple('nvarstcpxu')
-
 _dc_uri = 'http://purl.org/dc/elements/1.1/'
 
 _dc_qname_pairs = (
+    # dublin-core metadata needs the namespace uri prefixed
     (f'{{{_dc_uri}}}contributor', 'contributor'),
     (f'{{{_dc_uri}}}coverage', 'coverage'),
     (f'{{{_dc_uri}}}creator', 'creator'),
@@ -135,24 +55,25 @@ _dc_qname_pairs = (
     (f'{{{_dc_uri}}}type', 'type'),
 )
 
-DublinCoreMetadata = Dict  # While we support Python < 3.8
 
-# use the following if Python 3.8+
-# class DublinCoreMetadata(TypedDict, total=False):
-#     contributor: str
-#     coverage: str
-#     creator: str
-#     date: str
-#     description: str
-#     format: str
-#     identifier: str
-#     publisher: str
-#     relation: str
-#     rights: str
-#     source: str
-#     subject: str
-#     title: str
-#     -type: str  # NOTE: -type is to avoid mypy type comments
+class Metadata(NamedTuple):
+    contributor: Optional[str]
+    coverage: Optional[str]
+    creator: Optional[str]
+    date: Optional[str]
+    description: Optional[str]
+    format: Optional[str]
+    identifier: Optional[str]
+    publisher: Optional[str]
+    relation: Optional[str]
+    rights: Optional[str]
+    source: Optional[str]
+    subject: Optional[str]
+    title: Optional[str]
+    type: Optional[str]
+    status: Optional[str]
+    note: Optional[str]
+    confidence: Optional[float]
 
 
 # These types model the WN-LMF DTD
@@ -160,10 +81,7 @@ DublinCoreMetadata = Dict  # While we support Python < 3.8
 
 class Count(NamedTuple):
     value: int
-    status: Optional[str] = None
-    note: Optional[str] = None
-    confidence: Optional[float] = None
-    dcmeta: Optional[DublinCoreMetadata] = None
+    meta: Optional[Metadata]
 
 
 class SyntacticBehaviour(NamedTuple):
@@ -173,75 +91,55 @@ class SyntacticBehaviour(NamedTuple):
 
 class SenseRelation(NamedTuple):
     target: str
-    type: str  # Literal[*_sense_rels] if python 3.8+
-    status: Optional[str] = None
-    note: Optional[str] = None
-    confidence: Optional[float] = None
-    dcmeta: Optional[DublinCoreMetadata] = None
+    type: str  # Literal[*SENSE_RELATIONS] if python 3.8+
+    meta: Optional[Metadata]
 
 
 class SynsetRelation(NamedTuple):
     target: str
-    type: str  # Literal[*_synset_rels] if python 3.8+
-    status: Optional[str] = None
-    note: Optional[str] = None
-    confidence: Optional[float] = None
-    dcmeta: Optional[DublinCoreMetadata] = None
+    type: str  # Literal[*SYNSET_RELATIONS] if python 3.8+
+    meta: Optional[Metadata]
 
 
 class Example(NamedTuple):
     text: str
-    language: Optional[str] = None
-    status: Optional[str] = None
-    note: Optional[str] = None
-    confidence: Optional[float] = None
-    dcmeta: Optional[DublinCoreMetadata] = None
+    language: str
+    meta: Optional[Metadata]
 
 
 class ILIDefinition(NamedTuple):
     text: str
-    status: Optional[str] = None
-    note: Optional[str] = None
-    confidence: Optional[float] = None
-    dcmeta: Optional[DublinCoreMetadata] = None
+    meta: Optional[Metadata]
 
 
 class Definition(NamedTuple):
     text: str
-    language: Optional[str] = None
-    source_sense: Optional[str] = None
-    status: Optional[str] = None
-    note: Optional[str] = None
-    confidence: Optional[float] = None
-    dcmeta: Optional[DublinCoreMetadata] = None
+    language: str
+    source_sense: str
+    meta: Optional[Metadata]
 
 
 class Synset(NamedTuple):
     id: str
     ili: str
-    pos: Optional[str] = None  # Literal[*_pos] if Python 3.8+
-    definitions: Tuple[Definition, ...] = ()
-    ili_definition: Optional[ILIDefinition] = None
-    relations: Tuple[SynsetRelation, ...] = ()
-    examples: Tuple[Example, ...] = ()
-    status: Optional[str] = None
-    note: Optional[str] = None
-    confidence: Optional[float] = None
-    dcmeta: Optional[DublinCoreMetadata] = None
+    pos: str  # Literal[*POS_LIST] if Python 3.8+
+    definitions: Tuple[Definition, ...]
+    ili_definition: Optional[ILIDefinition]
+    relations: Tuple[SynsetRelation, ...]
+    examples: Tuple[Example, ...]
+    lexicalized: bool
+    meta: Optional[Metadata]
 
 
 class Sense(NamedTuple):
     id: str
     synset: str
-    relations: Tuple[SenseRelation, ...] = ()
-    examples: Tuple[Example, ...] = ()
-    counts: Tuple[Count, ...] = ()
-    lexicalized: bool = True
-    adjposition: Optional[str] = None  # Literal[*_adjpositions] if Python 3.8+
-    status: Optional[str] = None
-    note: Optional[str] = None
-    confidence: Optional[float] = None
-    dcmeta: Optional[DublinCoreMetadata] = None
+    relations: Tuple[SenseRelation, ...]
+    examples: Tuple[Example, ...]
+    counts: Tuple[Count, ...]
+    lexicalized: bool
+    adjposition: str  # Literal[*ADJPOSITIONS] if Python 3.8+
+    meta: Optional[Metadata]
 
 
 class Tag(NamedTuple):
@@ -251,27 +149,24 @@ class Tag(NamedTuple):
 
 class Form(NamedTuple):
     form: str
-    script: Optional[str] = None
-    tags: Tuple[Tag, ...] = ()
+    script: str
+    tags: Tuple[Tag, ...]
 
 
 class Lemma(NamedTuple):
     form: str
-    pos: str  # Literal[*_pos] if Python 3.8+
-    script: Optional[str] = None
-    tags: Tuple[Tag, ...] = ()
+    pos: str  # Literal[*POS_LIST] if Python 3.8+
+    script: str
+    tags: Tuple[Tag, ...]
 
 
 class LexicalEntry(NamedTuple):
     id: str
     lemma: Lemma
-    forms: Tuple[Form, ...] = ()
-    senses: Tuple[Sense, ...] = ()
-    syntactic_behaviors: Tuple[SyntacticBehaviour, ...] = ()
-    status: Optional[str] = None
-    note: Optional[str] = None
-    confidence: Optional[float] = None
-    dcmeta: Optional[DublinCoreMetadata] = None
+    forms: Tuple[Form, ...]
+    senses: Tuple[Sense, ...]
+    syntactic_behaviours: Tuple[SyntacticBehaviour, ...]
+    meta: Optional[Metadata]
 
 
 class Lexicon(NamedTuple):
@@ -281,17 +176,46 @@ class Lexicon(NamedTuple):
     email: str
     license: str
     version: str
-    lemmas: Tuple[LexicalEntry, ...]
+    lexical_entries: Tuple[LexicalEntry, ...]
     synsets: Tuple[Synset, ...]
-    url: Optional[str] = None
-    citation: Optional[str] = None
-    status: Optional[str] = None
-    note: Optional[str] = None
-    confidence: Optional[float] = None
-    dcmeta: Optional[DublinCoreMetadata] = None
+    url: str
+    citation: str
+    meta: Optional[Metadata]
+
+    def entry_ids(self) -> Set[str]:
+        return {entry.id for entry in self.lexical_entries}
+
+    def sense_ids(self) -> Set[str]:
+        return {sense.id for entry in self.lexical_entries for sense in entry.senses}
+
+    def synset_ids(self) -> Set[str]:
+        return {synset.id for synset in self.synsets}
 
 
 LexicalResource = Tuple[Lexicon, ...]
+
+
+def scan_lexicons(source: AnyPath) -> List[Dict]:
+    """Scan *source* and return only the top-level lexicon info."""
+
+    # this is implemeted with expat as it's much faster than etree for
+    # this task
+    infos = []
+
+    def start(name, attrs):
+        if name == 'Lexicon':
+            attrs['counts'] = {}
+            infos.append(attrs)
+        elif infos:
+            counts = infos[-1]['counts']
+            counts[name] = counts.get(name, 0) + 1
+
+    p = xml.parsers.expat.ParserCreate()
+    p.StartElementHandler = start
+    with open(source, 'rb') as fh:
+        p.ParseFile(fh)
+
+    return infos
 
 
 def load(source: AnyPath) -> LexicalResource:
@@ -312,6 +236,7 @@ def load(source: AnyPath) -> LexicalResource:
         event, elem = next(events)
 
     _assert_closed(event, elem, 'LexicalResource')
+    list(events)  # consume remaining events, if any
 
     return tuple(lexicons)
 
@@ -320,9 +245,9 @@ def _load_lexicon(local_root, events) -> Lexicon:
     attrs = local_root.attrib
     event, elem = next(events)
 
-    lemmas: List[LexicalEntry] = []
+    lexical_entries: List[LexicalEntry] = []
     while event == 'start' and elem.tag == 'LexicalEntry':
-        lemmas.append(_load_lexical_entry(elem, events))
+        lexical_entries.append(_load_lexical_entry(elem, events))
         local_root.clear()
         event, elem = next(events)
 
@@ -341,14 +266,11 @@ def _load_lexicon(local_root, events) -> Lexicon:
         attrs['email'],
         attrs['license'],
         attrs['version'],
-        tuple(lemmas),
+        tuple(lexical_entries),
         tuple(synsets),
         url=attrs.get('url'),
         citation=attrs.get('citation'),
-        status=attrs.get('status'),
-        note=attrs.get('note'),
-        confidence=_get_confidence(attrs),
-        dcmeta=_get_dublin_core_metadata(attrs),
+        meta=_get_metadata(attrs),
     )
 
 
@@ -367,11 +289,11 @@ def _load_lexical_entry(local_root, events) -> LexicalEntry:
         senses.append(_load_sense(elem, events))
         event, elem = next(events)
 
-    syntactic_behaviors: List[SyntacticBehaviour] = []
+    syntactic_behaviours: List[SyntacticBehaviour] = []
     while event == 'start' and elem.tag == 'SyntacticBehaviour':
         event, elem = next(events)
         _assert_closed(event, elem, 'SyntacticBehaviour')
-        syntactic_behaviors.append(_load_syntactic_behavior(elem))
+        syntactic_behaviours.append(_load_syntactic_behaviour(elem))
         event, elem = next(events)
 
     _assert_closed(event, elem, 'LexicalEntry')
@@ -381,11 +303,8 @@ def _load_lexical_entry(local_root, events) -> LexicalEntry:
         lemma,
         forms=tuple(forms),
         senses=tuple(senses),
-        syntactic_behaviors=tuple(syntactic_behaviors),
-        status=attrs.get('status'),
-        note=attrs.get('note'),
-        confidence=_get_confidence(attrs),
-        dcmeta=_get_dublin_core_metadata(attrs),
+        syntactic_behaviours=tuple(syntactic_behaviours),
+        meta=_get_metadata(attrs),
     )
 
 
@@ -396,7 +315,7 @@ def _load_lemma(events) -> Lemma:
     attrs = elem.attrib
     return Lemma(
         attrs['writtenForm'],
-        _get_literal(attrs['partOfSpeech'], _pos),
+        _get_literal(attrs['partOfSpeech'], POS_LIST),
         script=attrs.get('script'),
         tags=_load_tags_until(events, 'Lemma'))
 
@@ -432,7 +351,7 @@ def _load_sense(local_root, events) -> Sense:
     while event == 'start' and elem.tag == 'SenseRelation':
         event, elem = next(events)
         _assert_closed(event, elem, 'SenseRelation')
-        relations.append(_load_relation(elem, SenseRelation, _sense_rels))
+        relations.append(_load_relation(elem, SenseRelation, SENSE_RELATIONS))
         event, elem = next(events)
 
     examples: List[Example] = []
@@ -458,26 +377,21 @@ def _load_sense(local_root, events) -> Sense:
         examples=tuple(examples),
         counts=tuple(counts),
         lexicalized=_get_bool(attrs.get('lexicalized', 'true')),
-        adjposition=_get_optional_literal(attrs.get('adjposition'), _adjpositions),
-        status=attrs.get('status'),
-        note=attrs.get('note'),
-        confidence=_get_confidence(attrs),
-        dcmeta=_get_dublin_core_metadata(attrs),
+        adjposition=_get_optional_literal(attrs.get('adjposition'), ADJPOSITIONS),
+        meta=_get_metadata(attrs),
     )
 
 
 _R = TypeVar('_R', SynsetRelation, SenseRelation)
 
 
-def _load_relation(elem, cls: Type[_R], choices: Tuple[str, ...]) -> _R:
+def _load_relation(elem, cls: Type[_R], choices: Container[str]) -> _R:
     attrs = elem.attrib
     return cls(
         attrs['target'],
-        _get_literal(attrs['relType'], choices),
-        status=attrs.get('status'),
-        note=attrs.get('note'),
-        confidence=_get_confidence(attrs),
-        dcmeta=_get_dublin_core_metadata(attrs),
+        _get_literal
+        (attrs['relType'], choices),
+        meta=_get_metadata(attrs),
     )
 
 
@@ -486,10 +400,7 @@ def _load_example(elem) -> Example:
     return Example(
         elem.text,
         language=attrs.get('language'),
-        status=attrs.get('status'),
-        note=attrs.get('note'),
-        confidence=_get_confidence(attrs),
-        dcmeta=_get_dublin_core_metadata(attrs),
+        meta=_get_metadata(attrs),
     )
 
 
@@ -502,14 +413,11 @@ def _load_count(elem) -> Count:
         warnings.warn(f'count must be an integer: {elem.text}', LMFWarning)
     return Count(
         value,
-        status=attrs.get('status'),
-        note=attrs.get('note'),
-        confidence=_get_confidence(attrs),
-        dcmeta=_get_dublin_core_metadata(attrs),
+        meta=_get_metadata(attrs),
     )
 
 
-def _load_syntactic_behavior(elem) -> SyntacticBehaviour:
+def _load_syntactic_behaviour(elem) -> SyntacticBehaviour:
     attrs = elem.attrib
     return SyntacticBehaviour(
         attrs['subcategorizationFrame'],
@@ -539,7 +447,7 @@ def _load_synset(local_root, events) -> Synset:
     while event == 'start' and elem.tag == 'SynsetRelation':
         event, elem = next(events)
         _assert_closed(event, elem, 'SynsetRelation')
-        relations.append(_load_relation(elem, SynsetRelation, _synset_rels))
+        relations.append(_load_relation(elem, SynsetRelation, SYNSET_RELATIONS))
         event, elem = next(events)
 
     examples: List[Example] = []
@@ -554,15 +462,13 @@ def _load_synset(local_root, events) -> Synset:
     return Synset(
         attrs['id'],
         attrs['ili'],
-        pos=_get_optional_literal(attrs['partOfSpeech'], _pos),
+        pos=_get_optional_literal(attrs['partOfSpeech'], POS_LIST),
         definitions=tuple(definitions),
         ili_definition=ili_definition,
         relations=tuple(relations),
         examples=tuple(examples),
-        status=attrs.get('status'),
-        note=attrs.get('note'),
-        confidence=_get_confidence(attrs),
-        dcmeta=_get_dublin_core_metadata(attrs),
+        lexicalized=_get_bool(attrs.get('lexicalized', 'true')),
+        meta=_get_metadata(attrs),
     )
 
 
@@ -572,10 +478,7 @@ def _load_definition(elem) -> Definition:
         elem.text,
         language=attrs.get('language'),
         source_sense=attrs.get('sourceSense'),
-        status=attrs.get('status'),
-        note=attrs.get('note'),
-        confidence=_get_confidence(attrs),
-        dcmeta=_get_dublin_core_metadata(attrs),
+        meta=_get_metadata(attrs),
     )
 
 
@@ -583,23 +486,8 @@ def _load_ilidefinition(elem) -> ILIDefinition:
     attrs = elem.attrib
     return ILIDefinition(
         elem.text,
-        status=attrs.get('status'),
-        note=attrs.get('note'),
-        confidence=_get_confidence(attrs),
-        dcmeta=_get_dublin_core_metadata(attrs),
+        meta=_get_metadata(attrs),
     )
-
-
-def _get_confidence(attrs: Dict) -> Optional[float]:
-    conf = attrs.get('confidenceScore')
-    if conf:
-        try:
-            conf = float(conf)
-            assert 0 <= conf <= 1
-        except (ValueError, AssertionError):
-            warnings.warn(f'confidenceScore not between 0 and 1: {conf}', LMFWarning)
-            conf = None
-    return conf
 
 
 def _get_bool(value: str) -> bool:
@@ -609,25 +497,37 @@ def _get_bool(value: str) -> bool:
     return value == 'true'
 
 
-def _get_optional_literal(value: Optional[str], choices: Tuple[str, ...]) -> Optional[str]:
+def _get_optional_literal(value: Optional[str], choices: Container[str]) -> str:
     if value is None:
-        return value
+        return ''
     else:
         return _get_literal(value, choices)
 
 
-def _get_literal(value: str, choices: Tuple[str, ...]) -> str:
+def _get_literal(value: str, choices: Container[str]) -> str:
     if value is not None and value not in choices:
         warnings.warn(f'{value!r} is not one of {choices!r}', LMFWarning)
     return value
 
 
-def _get_dublin_core_metadata(attrs: Dict) -> DublinCoreMetadata:
-    dc: DublinCoreMetadata = {}
-    for qname, name in _dc_qname_pairs:
-        if qname in attrs:
-            dc[name] = attrs[qname]
-    return dc
+def _get_metadata(attrs: Dict) -> Optional[Metadata]:
+    metas = [attrs.get(qname) for qname, _ in _dc_qname_pairs]
+    metas.append(attrs.get('status'))
+    metas.append(attrs.get('note'))
+    if 'confidenceScore' in attrs:
+        value = attrs['confidenceScore']
+        try:
+            value = float(value)
+            assert 0 <= value <= 1
+        except (ValueError, AssertionError):
+            warnings.warn(f'confidenceScore not between 0 and 1: {value}', LMFWarning)
+        metas.append(value)
+    else:
+        metas.append(None)
+    if any(meta is not None for meta in metas):
+        return Metadata(*metas)
+    else:
+        return None
 
 
 def _assert_closed(event, elem, tag) -> None:
